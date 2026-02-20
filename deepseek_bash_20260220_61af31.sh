@@ -1,0 +1,185 @@
+#!/bin/bash
+
+# ===========================================
+# MR NODE PVT LTD - SERVER SETUP
+# ===========================================
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+PURPLE='\033[0;35m'
+NC='\033[0m'
+
+clear
+echo -e "${PURPLE}"
+echo "  ╔════════════════════════════════════╗"
+echo "  ║     MR NODE PVT LTD                ║"
+echo "  ║     Secure Server Setup            ║"
+echo "  ╚════════════════════════════════════╝"
+echo -e "${NC}"
+sleep 2
+
+# ===========================================
+# CHECK ROOT
+# ===========================================
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${YELLOW}⚠ This script needs root access${NC}"
+    echo -e "${BLUE}▶ Running with sudo...${NC}\n"
+    exec sudo bash "$0" "$@"
+    exit
+fi
+
+echo -e "${GREEN}✅ Running as root${NC}\n"
+sleep 1
+
+# ===========================================
+# SET ROOT PASSWORD
+# ===========================================
+echo -e "${CYAN}════════════════════════════════════${NC}"
+echo -e "${YELLOW}STEP 1: Root Password${NC}"
+echo -e "${CYAN}════════════════════════════════════${NC}\n"
+
+echo -e "${BLUE}▶ Set root password:${NC}"
+passwd root
+
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}✅ Password set${NC}\n"
+else
+    echo -e "${RED}❌ Failed${NC}"
+    exit 1
+fi
+sleep 1
+
+# ===========================================
+# SET HOSTNAME
+# ===========================================
+echo -e "${CYAN}════════════════════════════════════${NC}"
+echo -e "${YELLOW}STEP 2: Hostname${NC}"
+echo -e "${CYAN}════════════════════════════════════${NC}\n"
+
+echo -e "${BLUE}▶ Setting hostname to mrnode.in${NC}"
+hostnamectl set-hostname mrnode.in
+echo "mrnode.in" > /etc/hostname
+
+# Update hosts
+cat > /etc/hosts <<EOF
+127.0.0.1 localhost
+127.0.1.1 mrnode.in
+::1       localhost ip6-localhost ip6-loopback
+EOF
+
+echo -e "${GREEN}✅ Hostname: $(hostname)${NC}\n"
+sleep 1
+
+# ===========================================
+# BACKUP SSH
+# ===========================================
+echo -e "${CYAN}════════════════════════════════════${NC}"
+echo -e "${YELLOW}STEP 3: SSH Backup${NC}"
+echo -e "${CYAN}════════════════════════════════════${NC}\n"
+
+BACKUP="/etc/ssh/sshd_config.backup-$(date +%Y%m%d-%H%M%S)"
+cp /etc/ssh/sshd_config $BACKUP
+echo -e "${GREEN}✅ Backup: $BACKUP${NC}\n"
+sleep 1
+
+# ===========================================
+# CONFIGURE SSH
+# ===========================================
+echo -e "${CYAN}════════════════════════════════════${NC}"
+echo -e "${YELLOW}STEP 4: SSH Config${NC}"
+echo -e "${CYAN}════════════════════════════════════${NC}\n"
+
+cat > /etc/ssh/sshd_config <<'EOF'
+# MR NODE SSH CONFIG
+Port 22
+PermitRootLogin yes
+PasswordAuthentication yes
+PubkeyAuthentication yes
+ChallengeResponseAuthentication no
+UsePAM yes
+X11Forwarding no
+PrintMotd yes
+ClientAliveInterval 300
+MaxAuthTries 3
+Subsystem sftp /usr/lib/openssh/sftp-server
+EOF
+
+echo -e "${GREEN}✅ SSH configured${NC}\n"
+
+# Test config
+sshd -t
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}✅ Config test passed${NC}\n"
+else
+    echo -e "${RED}❌ Config test failed - restoring backup${NC}"
+    cp $BACKUP /etc/ssh/sshd_config
+    exit 1
+fi
+sleep 1
+
+# ===========================================
+# RESTART SSH
+# ===========================================
+echo -e "${BLUE}▶ Restarting SSH${NC}"
+systemctl restart ssh
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}✅ SSH restarted${NC}\n"
+else
+    service ssh restart
+    echo -e "${GREEN}✅ SSH restarted (sysv)${NC}\n"
+fi
+sleep 2
+
+# ===========================================
+# INSTALL MOTD
+# ===========================================
+echo -e "${CYAN}════════════════════════════════════${NC}"
+echo -e "${YELLOW}STEP 5: MrNode MOTD${NC}"
+echo -e "${CYAN}════════════════════════════════════${NC}\n"
+
+mkdir -p /etc/update-motd.d
+rm -f /etc/update-motd.d/*
+
+cat > /etc/update-motd.d/99-mrnode <<'EOF'
+#!/bin/bash
+echo ""
+echo "======================================"
+echo "  MR NODE PVT LTD"
+echo "======================================"
+echo "  Hostname: $(hostname)"
+echo "  IP: $(hostname -I | awk '{print $1}')"
+echo "  Uptime: $(uptime -p)"
+echo "  Users: $(who | wc -l)"
+echo "  Date: $(date)"
+echo "======================================"
+echo "  Secure Server - Authorized Only"
+echo "  support@mrnode.in"
+echo "======================================"
+echo ""
+EOF
+
+chmod +x /etc/update-motd.d/99-mrnode
+echo -e "${GREEN}✅ MOTD installed${NC}\n"
+
+# ===========================================
+# SHOW MOTD
+# ===========================================
+/etc/update-motd.d/99-mrnode
+sleep 2
+
+# ===========================================
+# COMPLETE
+# ===========================================
+IP=$(hostname -I | awk '{print $1}')
+echo -e "${GREEN}════════════════════════════════════${NC}"
+echo -e "${GREEN}✅ MR NODE SETUP COMPLETE${NC}"
+echo -e "${GREEN}════════════════════════════════════${NC}"
+echo ""
+echo -e "  ${YELLOW}Login:${NC}  ssh root@$IP"
+echo -e "  ${YELLOW}Password:${NC} [the one you set]"
+echo ""
+echo -e "${GREEN}════════════════════════════════════${NC}\n"
